@@ -156,7 +156,6 @@
   {"q": "What is the main gas that causes Global Warming?", "o": ["Oxygen", "Nitrogen", "Carbon dioxide", "Helium"], "c": 2, "e": "CO2 is a major greenhouse gas."},
   {"q": "In Physics, Force is measured in:", "o": ["Joule", "Pascal", "Newton", "Watt"], "c": 2, "e": "Force (F = ma) is measured in Newtons (N)."},
   {"q": "The plural of 'Criterion' is:", "o": ["Criterions", "Criteria", "Criterias", "Criteriones"], "c": 1, "e": "Criteria is the plural form of criterion."},
-,
   {"q": "Who was the first female empress of Ethiopia in her own right?", "o": ["Empress Taitu Betul", "Empress Zewditu", "Empress Menen", "Empress Eleni"], "c": 1, "e": "Empress Zewditu, daughter of Menelik II, reigned from 1916 to 1930."},
   {"q": "What is the result of 2^0 + 2^1 + 2^2?", "o": ["6", "7", "8", "4"], "c": 1, "e": "1 + 2 + 4 = 7."},
   {"q": "Which gas is the most abundant in the Sun?", "o": ["Helium", "Oxygen", "Hydrogen", "Carbon"], "c": 2, "e": "The Sun is composed of about 73% Hydrogen."},
