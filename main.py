@@ -7,7 +7,7 @@ from aiogram import Bot, Dispatcher, types
 from aiogram.filters import Command
 
 # 1. ቦቱን እና ባለቤቱን መለየት
-API_TOKEN = '8392060519:AAFMzK7HGRsZ-BkajlD6wcQ9W6Bq8BqkzNM'
+API_TOKEN = '8392060519:AAEn4tQwJgB2Q7QTNb5fM3XD59bnX34bxKg'
 ADMIN_ID = 8394878208 # ያንተ የቴሌግራም ID
 
 logging.basicConfig(level=logging.INFO)
