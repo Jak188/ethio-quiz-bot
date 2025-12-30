@@ -1,24 +1,4 @@
 [
-    {
-        "q": "If f(x) = 2x + 3, what is f(5)?",
-        "o": ["10", "13", "15", "8"],
-        "c": 1,
-        "e": "f(5) = 2(5) + 3 = 10 + 3 = 13."
-    },
-    {
-        "q": "Which law states that for every action, there is an equal and opposite reaction?",
-        "o": ["Newton's 1st Law", "Newton's 2nd Law", "Newton's 3rd Law", "Ohm's Law"],
-        "c": 2,
-        "e": "Newton's 3rd Law states that forces always occur in equal and opposite pairs."
-    },
-    {
-        "q": "She _____ to school every day.",
-        "o": ["go", "goes", "going", "gone"],
-        "c": 1,
-        "e": "For third-person singular (She), we add 's' or 'es' to the verb in simple present tense."
-    }
-]
-[
   {"q": "If f(x) = 3x + 2, find f(4).", "o": ["12", "14", "10", "16"], "c": 1, "e": "f(4) = 3(4) + 2 = 12 + 2 = 14."},
   {"q": "What is the unit of Force?", "o": ["Joule", "Watt", "Newton", "Pascal"], "c": 2, "e": "Force is measured in Newtons (N) according to the SI system."},
   {"q": "Solve for x: x^2 = 25.", "o": ["5 only", "-5 only", "5 and -5", "0"], "c": 2, "e": "Both 5*5 and (-5)*(-5) equal 25."},
