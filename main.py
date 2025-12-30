@@ -4,11 +4,13 @@ import logging
 from aiogram import Bot, Dispatcher, types
 from aiogram.filters import Command
 
-API_TOKEN = '8392060519:AAGQ4yLcsHLN9wgP92eZXW3DXPBom-a3Bkw'
+# አዲሱ Token እዚህ ጋር ገብቷል
+API_TOKEN = '8392060519:AAFMzK7HGRsZ-BkajlD6wcQ9W6Bq8BqkzNM'
+
+logging.basicConfig(level=logging.INFO)
 bot = Bot(token=API_TOKEN)
 dp = Dispatcher()
 
-# ጥያቄዎቹን ከፋይል የማንበብ ተግባር
 def load_questions():
     try:
         with open('questions.json', 'r', encoding='utf-8') as f:
@@ -20,7 +22,7 @@ def load_questions():
 async def send_quiz(chat_id):
     questions = load_questions()
     if not questions:
-        await bot.send_message(chat_id, "ጥያቄዎች አልተገኙም!")
+        await bot.send_message(chat_id, "ጥያቄዎች አልተገኙም! እባክህ questions.json ፋይልን አረጋግጥ።")
         return
     
     i = 0
@@ -36,12 +38,16 @@ async def send_quiz(chat_id):
             is_anonymous=False
         )
         i += 1
-        await asyncio.sleep(180)
+        await asyncio.sleep(180) # በየ 3 ደቂቃው
 
 @dp.message(Command("start_quiz"))
 async def start_quiz_handler(message: types.Message):
-    await message.answer("🚀 የጥያቄ ውድድሩ ተጀምሯል! በየ 3 ደቂቃው ይላካል።")
+    await message.answer("🚀 የጥያቄ ውድድሩ በአዲሱ Token ተጀምሯል! በየ 3 ደቂቃው ይላካል።")
     asyncio.create_task(send_quiz(message.chat.id))
+
+@dp.message(Command("start"))
+async def welcome(message: types.Message):
+    await message.answer("እንኳን ደህና መጣህ! የጥያቄ ውድድር ለመጀመር /start_quiz በል።")
 
 async def main():
     await dp.start_polling(bot)
