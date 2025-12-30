@@ -1,81 +1,101 @@
-import asyncio, json, logging, sqlite3, random
+import logging
+import json
 from aiogram import Bot, Dispatcher, types
-from aiogram.filters import Command
-from aiogram.types import Message, PollAnswer
+from aiogram.utils import executor
 
+# 1. ቦቱን እና ሎጊንግን ሴትአፕ ማድረግ
 API_TOKEN = '8392060519:AAFMzK7HGRsZ-BkajlD6wcQ9W6Bq8BqkzNM'
 logging.basicConfig(level=logging.INFO)
+
 bot = Bot(token=API_TOKEN)
-dp = Dispatcher()
+dp = Dispatcher(bot)
 
-# --- DATABASE ---
-def init_db():
-    conn = sqlite3.connect('quiz_bot.db')
-    cursor = conn.cursor()
-    cursor.execute('''CREATE TABLE IF NOT EXISTS users 
-                      (user_id INTEGER PRIMARY KEY, username TEXT, full_name TEXT, score INTEGER DEFAULT 0)''')
-    conn.commit()
-    conn.close()
+# 2. የጥያቄዎች ፋይልን መጫን
+with open('questions.json', 'r', encoding='utf-8') as f:
+    questions = json.load(f)
 
-def add_score(user_id, username, full_name):
-    conn = sqlite3.connect('quiz_bot.db')
-    cursor = conn.cursor()
-    cursor.execute('''INSERT INTO users (user_id, username, full_name, score) VALUES (?, ?, ?, 8)
-                      ON CONFLICT(user_id) DO UPDATE SET score = score + 8''', (user_id, username, full_name))
-    conn.commit()
-    conn.close()
+# 3. የተማሪዎችን ውጤት ለጊዜው በሜሞሪ ለመያዝ (ለወደፊቱ በDatabase ቢተካ ይመረጣል)
+# መዋቅሩ: {user_id: {"score": 0, "current_q": 0}}
+user_data = {}
 
-# --- QUIZ LOGIC ---
-active_polls = {} # የትኛው ጥያቄ የትኛው እንደሆነ ለማወቅ
+# --- የ /start ኮማንድ ---
+@dp.message_handler(commands=['start'])
+async def send_welcome(message: types.Message):
+    user_id = message.from_user.id
+    
+    # አዲስ ተማሪ ከሆነ ወይም ካቆመበት ለመቀጠል
+    if user_id not in user_data:
+        user_data[user_id] = {"score": 0, "current_q": 0}
+        await message.answer("እንኳን ደህና መጣህ! የዩኒቨርሲቲ መግቢያ ዝግጅት ጥያቄዎችን እንጀምራለን።")
+    else:
+        q_num = user_data[user_id]["current_q"]
+        score = user_data[user_id]["score"]
+        await message.answer(f"እንኳን ተመለስክ! ካቆምክበት (ጥያቄ {q_num + 1}) እንቀጥላለን። አሁን ያለህ ውጤት: {score}")
 
-def load_questions():
-    with open('questions.json', 'r', encoding='utf-8') as f:
-        return json.load(f)
+    await send_question(user_id)
 
-async def send_quiz(chat_id):
-    questions = load_questions()
-    while True:
-        q = random.choice(questions) # Random ጥያቄ
-        poll = await bot.send_poll(
-            chat_id=chat_id,
-            question=f"📝 {q['q']}",
-            options=q["o"],
-            type='quiz',
-            correct_option_id=q["c"],
-            explanation=f"💡 Explanation: {q['e']}\n✨ በርታ/ች! ትችላለህ/ያለሽ!",
-            is_anonymous=False
+# --- ጥያቄ ለመላክ የሚያገለግል Function ---
+async def send_question(user_id):
+    user_info = user_data[user_id]
+    q_index = user_info["current_q"]
+
+    if q_index < len(questions):
+        q = questions[q_index]
+        options = q["o"]
+        
+        # ተማሪው እንዲመርጥ Keyboard ማዘጋጀት
+        keyboard = types.ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
+        for option in options:
+            keyboard.add(types.KeyboardButton(option))
+        
+        await bot.send_message(user_id, f"ጥያቄ {q_index + 1}: {q['q']}", reply_markup=keyboard)
+    else:
+        await bot.send_message(user_id, f"ተጠናቋል! ሁሉንም 820 ጥያቄዎች ጨርሰሃል። የመጨረሻ ውጤትህ: {user_info['score']}")
+
+# --- የ /stop ኮማንድ (ውጤት ሴቭ አድርጎ የሚያቆም) ---
+@dp.message_handler(commands=['stop'])
+async def stop_quiz(message: types.Message):
+    user_id = message.from_user.id
+    if user_id in user_data:
+        score = user_data[user_id]["score"]
+        q_num = user_data[user_id]["current_q"]
+        
+        # እዚህ ጋር ዳታቤዝ ካለህ ወደ ዳታቤዝ ሴቭ ታደርጋለህ
+        await message.answer(
+            f"ጥያቄዎች ቆመዋል! 🛑\n"
+            f"ያመጣኸው ውጤት: {score}\n"
+            f"እስካሁን {q_num} ጥያቄዎችን ሰርተሃል።\n"
+            f"ለመቀጠል /start በል!"
         )
-        # የትክክለኛውን መልስ ቁጥር ለጊዜው እንያዝ
-        active_polls[poll.poll.id] = q["c"]
-        await asyncio.sleep(120) # በየ 2 ደቂቃው
+        # Keyboardዱን ለማጥፋት
+        await bot.send_message(user_id, "ቻው!", reply_markup=types.ReplyKeyboardRemove())
+    else:
+        await message.answer("ገና ምንም ጥያቄ አልጀመርክም። ለመጀመር /start በል።")
 
-@dp.poll_answer()
-async def handle_poll_answer(poll_answer: PollAnswer):
-    correct_id = active_polls.get(poll_answer.poll_id)
-    if poll_answer.option_ids[0] == correct_id:
-        user = poll_answer.user
-        add_score(user.id, user.username, user.full_name)
-        # ለሞራል መልእክት መላክ ይቻላል (ለግሩፕ ከሆነ)
+# --- የመልስ መቀበያ (መደበኛ መልዕክት) ---
+@dp.message_handler()
+async def handle_answer(message: types.Message):
+    user_id = message.from_user.id
+    if user_id not in user_data:
+        return
 
-@dp.message(Command("rank"))
-async def cmd_rank(message: Message):
-    conn = sqlite3.connect('quiz_bot.db')
-    cursor = conn.cursor()
-    cursor.execute('SELECT full_name, score FROM users ORDER BY score DESC LIMIT 10')
-    ranks = cursor.fetchall()
-    text = "🏆 **የመሪዎች ሰሌዳ (Top 10)** 🏆\n\n"
-    for i, (name, score) in enumerate(ranks, 1):
-        text += f"{i}. {name} — {score} ነጥብ 🌟\n"
-    await message.answer(text, parse_mode="Markdown")
+    user_info = user_data[user_id]
+    q_index = user_info["current_q"]
+    
+    if q_index < len(questions):
+        correct_answer_index = questions[q_index]["c"]
+        correct_answer_text = questions[q_index]["o"][correct_answer_index]
+        explanation = questions[q_index]["e"]
 
-@dp.message(Command("start_quiz"))
-async def start(message: Message):
-    await message.answer("🚀 የ Entrance ዝግጅት ተጀመረ! ፈጣን ሁኑ!")
-    asyncio.create_task(send_quiz(message.chat.id))
+        if message.text == correct_answer_text:
+            user_info["score"] += 1
+            await message.answer("ትክክል ነህ! ✅")
+        else:
+            await message.answer(f"ተሳስተሃል። ❌ ትክክለኛው መልስ: {correct_answer_text}\n\nማብራሪያ: {explanation}")
 
-async def main():
-    init_db()
-    await dp.start_polling(bot)
+        # ወደ ቀጣዩ ጥያቄ ማለፍ
+        user_info["current_q"] += 1
+        await send_question(user_id)
 
 if __name__ == '__main__':
-    asyncio.run(main())
+    executor.start_polling(dp, skip_updates=True)
