@@ -1,130 +1,81 @@
-import asyncio
-import json
-import logging
-import random
-import sqlite3
+import asyncio, json, logging, sqlite3, random
 from aiogram import Bot, Dispatcher, types
 from aiogram.filters import Command
+from aiogram.types import Message, PollAnswer
 
-# 1. ቦቱን እና ባለቤቱን መለየት
 API_TOKEN = '8392060519:AAFMzK7HGRsZ-BkajlD6wcQ9W6Bq8BqkzNM'
-ADMIN_ID = 8394878208 # የሰጠኸኝ ID እዚህ ገብቷል
-
 logging.basicConfig(level=logging.INFO)
 bot = Bot(token=API_TOKEN)
 dp = Dispatcher()
 
-# 2. የዳታቤዝ ዝግጅት (SQLite)
-conn = sqlite3.connect('quiz_bot.db', check_same_thread=False)
-cursor = conn.cursor()
-cursor.execute('''CREATE TABLE IF NOT EXISTS scores 
-                  (user_id INTEGER PRIMARY KEY, name TEXT, points INTEGER)''')
-conn.commit()
-
-# 3. የጥያቄዎች ፋይል
-with open('questions.json', 'r', encoding='utf-8') as f:
-    questions = json.load(f)
-
-running_loops = {} 
-answered_users = {}
-
-# --- ውጤትን በዳታቤዝ ውስጥ ለመጨመር ---
-def update_score(user_id, name, points):
-    cursor.execute("SELECT points FROM scores WHERE user_id = ?", (user_id,))
-    row = cursor.fetchone()
-    if row:
-        new_points = row[0] + points
-        cursor.execute("UPDATE scores SET points = ?, name = ? WHERE user_id = ?", (new_points, name, user_id))
-    else:
-        cursor.execute("INSERT INTO scores (user_id, name, points) VALUES (?, ?, ?)", (user_id, name, points))
+# --- DATABASE ---
+def init_db():
+    conn = sqlite3.connect('quiz_bot.db')
+    cursor = conn.cursor()
+    cursor.execute('''CREATE TABLE IF NOT EXISTS users 
+                      (user_id INTEGER PRIMARY KEY, username TEXT, full_name TEXT, score INTEGER DEFAULT 0)''')
     conn.commit()
+    conn.close()
 
-# --- የ /start ኮማንድ (ለአድሚን ብቻ) ---
-@dp.message(Command("start"))
-async def cmd_start(message: types.Message):
-    if message.from_user.id != ADMIN_ID:
-        return 
-    
-    chat_id = message.chat.id
-    if running_loops.get(chat_id):
-        return await message.answer("ቦቱ ቀድሞውኑ እየሰራ ነው።")
+def add_score(user_id, username, full_name):
+    conn = sqlite3.connect('quiz_bot.db')
+    cursor = conn.cursor()
+    cursor.execute('''INSERT INTO users (user_id, username, full_name, score) VALUES (?, ?, ?, 8)
+                      ON CONFLICT(user_id) DO UPDATE SET score = score + 8''', (user_id, username, full_name))
+    conn.commit()
+    conn.close()
 
-    running_loops[chat_id] = True
-    await message.answer("የጥያቄ ውድድር በዳታቤዝ ታጅቦ ተጀምሯል! 🚀\nበየ 3 ደቂቃው ጥያቄ ይቀርባል።")
-    asyncio.create_task(quiz_loop(chat_id))
+# --- QUIZ LOGIC ---
+active_polls = {} # የትኛው ጥያቄ የትኛው እንደሆነ ለማወቅ
 
-# --- የጥያቄ ዑደት ---
-async def quiz_loop(chat_id):
-    random_questions = list(questions)
-    random.shuffle(random_questions)
-    
-    q_index = 0
-    while running_loops.get(chat_id):
-        if q_index >= len(random_questions):
-            random.shuffle(random_questions)
-            q_index = 0
-            
-        current_q = random_questions[q_index]
-        answered_users[chat_id] = []
-        
-        options_text = "\n".join([f"{idx+1}. {opt}" for idx, opt in enumerate(current_q['o'])])
-        msg_text = f"🔹 Subject: {current_q.get('subject', 'General')}\n\n{current_q['q']}\n\n{options_text}"
-        
-        # ፎቶ ካለ መላክ፣ ከሌለ በቴክስት ብቻ
-        try:
-            if "img" in current_q and current_q["img"] and current_q["img"].startswith("http"):
-                sent_msg = await bot.send_photo(chat_id, photo=current_q["img"], caption=msg_text)
-            else:
-                sent_msg = await bot.send_message(chat_id, msg_text)
-            
-            running_loops[chat_id] = {"q": current_q, "msg_id": sent_msg.message_id, "active": True}
-        except Exception as e:
-            logging.error(f"Error sending: {e}")
+def load_questions():
+    with open('questions.json', 'r', encoding='utf-8') as f:
+        return json.load(f)
 
-        q_index += 1
-        await asyncio.sleep(180) # 3 ደቂቃ
+async def send_quiz(chat_id):
+    questions = load_questions()
+    while True:
+        q = random.choice(questions) # Random ጥያቄ
+        poll = await bot.send_poll(
+            chat_id=chat_id,
+            question=f"📝 {q['q']}",
+            options=q["o"],
+            type='quiz',
+            correct_option_id=q["c"],
+            explanation=f"💡 Explanation: {q['e']}\n✨ በርታ/ች! ትችላለህ/ያለሽ!",
+            is_anonymous=False
+        )
+        # የትክክለኛውን መልስ ቁጥር ለጊዜው እንያዝ
+        active_polls[poll.poll.id] = q["c"]
+        await asyncio.sleep(120) # በየ 2 ደቂቃው
 
-# --- መልስ መቀበያ ---
-@dp.message()
-async def handle_answer(message: types.Message):
-    chat_id = message.chat.id
-    user_id = message.from_user.id
-    
-    loop_info = running_loops.get(chat_id)
-    if not loop_info or not isinstance(loop_info, dict) or not loop_info.get("active"):
-        return
+@dp.poll_answer()
+async def handle_poll_answer(poll_answer: PollAnswer):
+    correct_id = active_polls.get(poll_answer.poll_id)
+    if poll_answer.option_ids[0] == correct_id:
+        user = poll_answer.user
+        add_score(user.id, user.username, user.full_name)
+        # ለሞራል መልእክት መላክ ይቻላል (ለግሩፕ ከሆነ)
 
-    if user_id in answered_users.get(chat_id, []):
-        return
+@dp.message(Command("rank"))
+async def cmd_rank(message: Message):
+    conn = sqlite3.connect('quiz_bot.db')
+    cursor = conn.cursor()
+    cursor.execute('SELECT full_name, score FROM users ORDER BY score DESC LIMIT 10')
+    ranks = cursor.fetchall()
+    text = "🏆 **የመሪዎች ሰሌዳ (Top 10)** 🏆\n\n"
+    for i, (name, score) in enumerate(ranks, 1):
+        text += f"{i}. {name} — {score} ነጥብ 🌟\n"
+    await message.answer(text, parse_mode="Markdown")
 
-    current_q = loop_info["q"]
-    correct_text = current_q["o"][current_q["c"]]
-
-    if message.text == correct_text:
-        if chat_id not in answered_users: answered_users[chat_id] = []
-        answered_users[chat_id].append(user_id)
-        
-        is_first = len(answered_users[chat_id]) == 1
-        points = 8 if is_first else 4
-        
-        # ውጤትን በዳታቤዝ ውስጥ ማስቀመጥ
-        update_score(user_id, message.from_user.full_name, points)
-        
-        if is_first:
-            await message.answer(f"👏 ጎበዝ {message.from_user.first_name}! ቀድመህ በመመለስህ 8 ነጥብ አግኝተሃል!")
-        else:
-            await message.answer(f"✅ ትክክል {message.from_user.first_name}! 4 ነጥብ ተጨምሮልሃል።")
-
-# --- የ /stop ኮማንድ (ለአድሚን ብቻ) ---
-@dp.message(Command("stop"))
-async def cmd_stop(message: types.Message):
-    if message.from_user.id != ADMIN_ID:
-        return
-    running_loops[message.chat.id] = False
-    await message.answer("ውድድሩ ቆሟል። ውጤቶች በዳታቤዝ ተቀምጠዋል። 🛑")
+@dp.message(Command("start_quiz"))
+async def start(message: Message):
+    await message.answer("🚀 የ Entrance ዝግጅት ተጀመረ! ፈጣን ሁኑ!")
+    asyncio.create_task(send_quiz(message.chat.id))
 
 async def main():
+    init_db()
     await dp.start_polling(bot)
 
-if __name__ == "__main__":
+if __name__ == '__main__':
     asyncio.run(main())
