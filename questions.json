@@ -1,0 +1,20 @@
+[
+    {
+        "q": "If f(x) = 2x + 3, what is f(5)?",
+        "o": ["10", "13", "15", "8"],
+        "c": 1,
+        "e": "f(5) = 2(5) + 3 = 10 + 3 = 13."
+    },
+    {
+        "q": "Which law states that for every action, there is an equal and opposite reaction?",
+        "o": ["Newton's 1st Law", "Newton's 2nd Law", "Newton's 3rd Law", "Ohm's Law"],
+        "c": 2,
+        "e": "Newton's 3rd Law states that forces always occur in equal and opposite pairs."
+    },
+    {
+        "q": "She _____ to school every day.",
+        "o": ["go", "goes", "going", "gone"],
+        "c": 1,
+        "e": "For third-person singular (She), we add 's' or 'es' to the verb in simple present tense."
+    }
+]
