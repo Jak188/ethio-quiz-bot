@@ -25,8 +25,7 @@ conn.commit()
 try:
     with open('questions.json', 'r', encoding='utf-8') as f:
         questions = json.load(f)
-except Exception as e:
-    logging.error(f"Error loading questions: {e}")
+except:
     questions = []
 
 active_loops = {}
@@ -64,6 +63,19 @@ async def cmd_stop(message: types.Message):
     active_loops[message.chat.id] = False
     await message.answer("🛑 ውድድሩ በዚህ ግሩፕ ቆሟል። ውጤቶች ተቀምጠዋል።")
 
+# --- 2. Rank የመሰረዝ ኮማንድ (/clear_rank) ---
+@dp.message(Command("clear_rank"))
+async def cmd_clear_rank(message: types.Message):
+    if message.from_user.id not in ADMIN_IDS:
+        return
+    
+    try:
+        cursor.execute("DELETE FROM scores")
+        conn.commit()
+        await message.answer("🗑 የደረጃ ሠንጠረዡ በሙሉ ተሰርዟል! አዲስ ውድድር መጀመር ይቻላል።")
+    except Exception as e:
+        await message.answer(f"❌ ስህተት ተፈጥሯል: {e}")
+
 @dp.message(Command("rank"))
 async def cmd_rank(message: types.Message):
     cursor.execute("SELECT name, points FROM scores ORDER BY points DESC LIMIT 10")
@@ -75,16 +87,6 @@ async def cmd_rank(message: types.Message):
     for i, row in enumerate(rows, 1):
         text += f"{i}. {row[0]} — {row[1]} ነጥብ\n"
     await message.answer(text)
-
-# 3. Rank ማጽጃ ኮማንድ (አዲስ የተጨመረ)
-@dp.message(Command("clear_rank"))
-async def cmd_clear_rank(message: types.Message):
-    if message.from_user.id not in ADMIN_IDS:
-        return
-    
-    cursor.execute("DELETE FROM scores")
-    conn.commit()
-    await message.answer("🧹 የደረጃ ሰንጠረዥ በሙሉ ተሰርዟል። አዲስ ውድድር መጀመር ይቻላል።")
 
 # --- የጥያቄ ዑደት (በየ 4 ደቂቃ) ---
 async def quiz_timer(chat_id):
@@ -99,8 +101,6 @@ async def quiz_timer(chat_id):
         
         q = local_q[idx]
         subject = q.get('subject', 'General')
-        # ማብራሪያ ካለ ለማሳየት (Explanation)
-        explanation = q.get('ex', 'ትክክለኛውን መልስ ስለመለሱ እናመሰግናለን!') 
         
         try:
             sent_poll = await bot.send_poll(
@@ -109,7 +109,6 @@ async def quiz_timer(chat_id):
                 options=q['o'],
                 type='quiz',
                 correct_option_id=q['c'],
-                explanation=explanation, # ማብራሪያው እዚህ ጋር ይገባል
                 is_anonymous=False
             )
             poll_map[sent_poll.poll.id] = {
@@ -120,7 +119,7 @@ async def quiz_timer(chat_id):
             }
             idx += 1
         except Exception as e:
-            logging.error(f"Error sending poll: {e}")
+            logging.error(f"Error: {e}")
 
         await asyncio.sleep(240) # 240 ሰከንድ = 4 ደቂቃ
 
@@ -142,11 +141,11 @@ async def on_poll_answer(poll_answer: types.PollAnswer):
         points = 8 if is_first else 4
         save_score(user_id, user_name, points)
         
-        # 1. የጽሑፍ ለውጥ (የተጠየቀው)
+        # --- 1. የመልዕክት ለውጥ (GREAT!) ---
         if is_first:
             await bot.send_message(
                 data["chat_id"], 
-                f"GREAT {poll_answer.user.first_name} ቀድመው በመመለስዎ 8 ነጥብ አግኝተዋል! 🌟"
+                f"GREAT {poll_answer.user.full_name} ቀድመው በመመለስዎ 8 ነጥብ አግኝተዋል! 🌟"
             )
     
     # ለተሳተፈ (ለተሳሳተ) 1.5 ነጥብ
