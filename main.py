@@ -3,6 +3,7 @@ import json
 import logging
 import random
 import sqlite3
+import aiohttp
 from aiogram import Bot, Dispatcher, types
 from aiogram.filters import Command
 from aiogram.client.default import DefaultBotProperties
@@ -14,12 +15,16 @@ ADMIN_IDS = [7231324244, 8394878208]
 
 logging.basicConfig(level=logging.INFO)
 
-# የኔትወርክ ስህተትን ለመቀነስ Timeout መጨመር
-session = AiohttpSession()
+# የኔትወርክ ስህተትን ለመቀነስ በ AiohttpSession በኩል timeout ማስተካከል
+# ይህ በስክሪንሾቱ ላይ የታየውን TypeError ያስቀራል
+session = AiohttpSession(
+    timeout=aiohttp.ClientTimeout(total=40)
+)
+
 bot = Bot(
     token=API_TOKEN, 
     session=session,
-    default=DefaultBotProperties(timeout=40)
+    default=DefaultBotProperties(parse_mode="HTML")
 )
 dp = Dispatcher()
 
@@ -79,8 +84,8 @@ async def cmd_stop(message: types.Message):
     
     stop_text = "🛑 ውድድሩ በዚህ ግሩፕ ቆሟል።\n\n"
     if winner:
-        stop_text += f"🏆 የዛሬው አሸናፊ: {winner[0]}\n"
-        stop_text += f"⭐️ ያጠራቀሙት ነጥብ: {winner[1]}\n\n"
+        stop_text += f"🏆 የዛሬው አሸናፊ: <b>{winner[0]}</b>\n"
+        stop_text += f"⭐️ ያጠራቀሙት ነጥብ: <b>{winner[1]}</b>\n\n"
         stop_text += "እንኳን ደስ አለዎት! 🎉🎊🥳 🏆🏆🏆"
     
     await message.answer(stop_text)
@@ -158,7 +163,7 @@ async def on_poll_answer(poll_answer: types.PollAnswer):
         save_score(user_id, user_name, points)
         
         if is_first:
-            await bot.send_message(data["chat_id"], f"GREAT {user_name} ቀድመው በመመለስዎ 8 ነጥብ አግኝተዋል! 🎉")
+            await bot.send_message(data["chat_id"], f"GREAT <b>{user_name}</b> ቀድመው በመመለስዎ 8 ነጥብ አግኝተዋል! 🎉")
     else:
         save_score(user_id, user_name, 1.5)
 
