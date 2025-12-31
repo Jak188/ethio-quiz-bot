@@ -25,7 +25,8 @@ conn.commit()
 try:
     with open('questions.json', 'r', encoding='utf-8') as f:
         questions = json.load(f)
-except:
+except Exception as e:
+    logging.error(f"Error loading questions: {e}")
     questions = []
 
 active_loops = {}
@@ -60,21 +61,30 @@ async def cmd_start(message: types.Message):
 async def cmd_stop(message: types.Message):
     if message.from_user.id not in ADMIN_IDS:
         return
-    active_loops[message.chat.id] = False
-    await message.answer("🛑 ውድድሩ በዚህ ግሩፕ ቆሟል። ውጤቶች ተቀምጠዋል።")
+    
+    chat_id = message.chat.id
+    active_loops[chat_id] = False
+    
+    # አሸናፊውን መፈለግ
+    cursor.execute("SELECT name, points FROM scores ORDER BY points DESC LIMIT 1")
+    winner = cursor.fetchone()
+    
+    stop_text = "🛑 ውድድሩ በዚህ ግሩፕ ቆሟል።\n\n"
+    if winner:
+        stop_text += f"🏆 የዛሬው አሸናፊ: {winner[0]}\n"
+        stop_text += f"⭐️ ያጠራቀሙት ነጥብ: {winner[1]}\n\n"
+        stop_text += "እንኳን ደስ አለዎት! 🎉🎊🥳 🏆🏆🏆"
+    
+    await message.answer(stop_text)
 
-# --- 2. Rank የመሰረዝ ኮማንድ (/clear_rank) ---
 @dp.message(Command("clear_rank"))
-async def cmd_clear_rank(message: types.Message):
+async def cmd_clear(message: types.Message):
     if message.from_user.id not in ADMIN_IDS:
         return
     
-    try:
-        cursor.execute("DELETE FROM scores")
-        conn.commit()
-        await message.answer("🗑 የደረጃ ሠንጠረዡ በሙሉ ተሰርዟል! አዲስ ውድድር መጀመር ይቻላል።")
-    except Exception as e:
-        await message.answer(f"❌ ስህተት ተፈጥሯል: {e}")
+    cursor.execute("DELETE FROM scores")
+    conn.commit()
+    await message.answer("♻️ የደረጃ ሰንጠረዡ በሙሉ ተሰርዟል። አዲስ ውድድር መጀመር ይቻላል።")
 
 @dp.message(Command("rank"))
 async def cmd_rank(message: types.Message):
@@ -88,7 +98,7 @@ async def cmd_rank(message: types.Message):
         text += f"{i}. {row[0]} — {row[1]} ነጥብ\n"
     await message.answer(text)
 
-# --- የጥያቄ ዑደት (በየ 4 ደቂቃ) ---
+# --- የጥያቄ ዑደት ---
 async def quiz_timer(chat_id):
     local_q = list(questions)
     random.shuffle(local_q)
@@ -121,7 +131,7 @@ async def quiz_timer(chat_id):
         except Exception as e:
             logging.error(f"Error: {e}")
 
-        await asyncio.sleep(240) # 240 ሰከንድ = 4 ደቂቃ
+        await asyncio.sleep(240) # 4 ደቂቃ
 
 @dp.poll_answer()
 async def on_poll_answer(poll_answer: types.PollAnswer):
@@ -134,21 +144,14 @@ async def on_poll_answer(poll_answer: types.PollAnswer):
     if user_id not in data["all_participants"]:
         data["all_participants"].append(user_id)
 
-    # ትክክል ከመለሰ
     if poll_answer.option_ids[0] == data["correct"]:
         data["winners"].append(user_id)
         is_first = len(data["winners"]) == 1
         points = 8 if is_first else 4
         save_score(user_id, user_name, points)
         
-        # --- 1. የመልዕክት ለውጥ (GREAT!) ---
         if is_first:
-            await bot.send_message(
-                data["chat_id"], 
-                f"GREAT {poll_answer.user.full_name} ቀድመው በመመለስዎ 8 ነጥብ አግኝተዋል! 🌟"
-            )
-    
-    # ለተሳተፈ (ለተሳሳተ) 1.5 ነጥብ
+            await bot.send_message(data["chat_id"], f"GREAT {user_name} ቀድመው በመመለስዎ 8 ነጥብ አግኝተዋል! 🎉")
     else:
         save_score(user_id, user_name, 1.5)
 
