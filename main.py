@@ -24,9 +24,9 @@ conn.commit()
 # 3. የጥያቄዎች ፋይል
 try:
     with open('questions.json', 'r', encoding='utf-8') as f:
-        questions = json.load(f)
+        all_questions = json.load(f)
 except:
-    questions = []
+    all_questions = []
 
 active_loops = {}
 poll_map = {}
@@ -50,10 +50,19 @@ async def cmd_start(message: types.Message):
     
     chat_id = message.chat.id
     if active_loops.get(chat_id):
-        return await message.answer("⚠️ ውድድሩ በዚህ ግሩፕ ቀድሞውኑ እየሰራ ነው።")
+        return await message.answer("⚠️ ውድድሩ ቀድሞውኑ እየሰራ ነው።")
 
     active_loops[chat_id] = True
-    await message.answer("🎯 የኩዊዝ ውድድር ተጀመረ!\n⏰ በየ 4 ደቂቃው ጥያቄ ይላካል።\n🥇 1ኛ ለመለሰ: 8 ነጥብ\n✅ ለሌላ ትክክል: 4 ነጥብ\n✍️ ለተሳተፈ: 1.5 ነጥብ")
+    # 3. ውድድሩ ሲጀመር መልካም ምኞት
+    start_msg = (
+        "🎯 የኩዊዝ ውድድር ተጀመረ!\n"
+        "መልካም እድል ለሁላችሁም! 🍀 መልካም የውድድር ጊዜ ይሁንላችሁ።\n\n"
+        "⏰ በየ 4 ደቂቃው ጥያቄ ይላካል።\n"
+        "🥇 1ኛ ለመለሰ: 8 ነጥብ\n"
+        "✅ ለሌላ ትክክል: 4 ነጥብ\n"
+        "✍️ ለተሳተፈ: 1.5 ነጥብ"
+    )
+    await message.answer(start_msg)
     asyncio.create_task(quiz_timer(chat_id))
 
 @dp.message(Command("stop"))
@@ -63,17 +72,22 @@ async def cmd_stop(message: types.Message):
     
     active_loops[message.chat.id] = False
     
-    # አሸናፊውን መፈለግ
     cursor.execute("SELECT name, points FROM scores ORDER BY points DESC LIMIT 1")
     winner = cursor.fetchone()
     
-    stop_text = "🛑 ውድድሩ በዚህ ግሩፕ ቆሟል። ውጤቶች ተቀምጠዋል።\n\n"
+    # 2. ለአሸናፊው ብዙ ርችት እና ሽልማት
     if winner:
-        stop_text += f"🏆 የዛሬው አሸናፊ፡ {winner[0]}\n"
-        stop_text += f"💰 ያከማቹት ነጥብ፡ {winner[1]}\n"
-        stop_text += "እንኳን ደስ አሎት! 🎆🎊🥂🏆"
-    
-    await message.answer(stop_text)
+        congrats_text = (
+            f"🛑 ውድድሩ ተጠናቋል! 🛑\n\n"
+            f"🎊✨🎆 🎇 🎆 ✨🎊\n"
+            f"🏆 የዛሬው ታላቅ አሸናፊ፡ {winner[0]}\n"
+            f"💰 ያከማቹት አጠቃላይ ነጥብ፡ {winner[1]}\n"
+            f"🎊✨🎆 🎇 🎆 ✨🎊\n\n"
+            "እንኳን ደስ አሎት! ቀጣይ ውድድር ላይ እንገናኝ። 👋"
+        )
+        await message.answer(congrats_text)
+    else:
+        await message.answer("🛑 ውድድሩ ቆሟል። ምንም ውጤት አልተመዘገበም።")
 
 @dp.message(Command("rank"))
 async def cmd_rank(message: types.Message):
@@ -91,23 +105,25 @@ async def cmd_rank(message: types.Message):
 async def cmd_clear(message: types.Message):
     if message.from_user.id not in ADMIN_IDS:
         return
-    
     cursor.execute("DELETE FROM scores")
     conn.commit()
-    await message.answer("🧹 የደረጃ ሰንጠረዥ በሙሉ ተሰርዟል! አዲስ ውድድር መጀመር ይቻላል።")
+    await message.answer("🧹 የደረጃ ሰንጠረዥ በሙሉ ተሰርዟል!")
 
-# --- የጥያቄ ዑደት ---
+# --- 4 & 5. የጥያቄ ዑደት (Random & No Repeat) ---
 async def quiz_timer(chat_id):
-    local_q = list(questions)
-    random.shuffle(local_q)
-    idx = 0
+    # ጥያቄዎችን በየዙሩ በዘፈቀደ ለመቀያየር
+    available_questions = list(all_questions)
     
     while active_loops.get(chat_id):
-        if idx >= len(local_q):
-            random.shuffle(local_q)
-            idx = 0
+        if not available_questions:
+            # ጥያቄዎች ካለቁ እንደገና ከፋይሉ ይጫኑ
+            available_questions = list(all_questions)
+            
+        # 4. በዘፈቀደ (Random) መምረጥ
+        q = random.choice(available_questions)
+        # 5. የተመረጠውን ጥያቄ ከዝርዝሩ ማስወገድ (እንዳይደገም)
+        available_questions.remove(q)
         
-        q = local_q[idx]
         subject = q.get('subject', 'General')
         
         try:
@@ -125,11 +141,11 @@ async def quiz_timer(chat_id):
                 "winners": [], 
                 "all_participants": []
             }
-            idx += 1
         except Exception as e:
-            logging.error(f"Error: {e}")
+            logging.error(f"Error sending poll: {e}")
 
-        await asyncio.sleep(240) # 4 ደቂቃ
+        # 1. በየ 4 ደቂቃው (240 ሰከንድ)
+        await asyncio.sleep(240)
 
 @dp.poll_answer()
 async def on_poll_answer(poll_answer: types.PollAnswer):
@@ -142,7 +158,6 @@ async def on_poll_answer(poll_answer: types.PollAnswer):
     if user_id not in data["all_participants"]:
         data["all_participants"].append(user_id)
 
-    # ትክክል ከመለሰ
     if poll_answer.option_ids[0] == data["correct"]:
         data["winners"].append(user_id)
         is_first = len(data["winners"]) == 1
@@ -150,10 +165,7 @@ async def on_poll_answer(poll_answer: types.PollAnswer):
         save_score(user_id, user_name, points)
         
         if is_first:
-            # ጥያቄ 1 ላይ የፈለጉት ማስተካከያ
-            await bot.send_message(data["chat_id"], f"GREAT {poll_answer.user.full_name} ቀድመው በመመለስዎ 8 ነጥብ አግኝተዋል! 🎉")
-    
-    # ለተሳሳተ ተሳትፎ 1.5 ነጥብ
+            await bot.send_message(data["chat_id"], f"GREAT {user_name} ቀድመው በመመለስዎ 8 ነጥብ አግኝተዋል! 🎉")
     else:
         save_score(user_id, user_name, 1.5)
 
