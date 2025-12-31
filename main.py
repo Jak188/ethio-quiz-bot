@@ -5,13 +5,18 @@ import random
 import sqlite3
 from aiogram import Bot, Dispatcher, types
 from aiogram.filters import Command
+from aiogram.client.session.aiohttp import AiohttpSession
+from aiogram.exceptions import TelegramNetworkError
 
 # 1. ቦቱን እና ባለቤቶቹን መለየት
 API_TOKEN = '8392060519:AAEn4tQwJgB2Q7QTNb5fM3XD59bnX34bxKg'
 ADMIN_IDS = [7231324244, 8394878208] 
 
 logging.basicConfig(level=logging.INFO)
-bot = Bot(token=API_TOKEN)
+
+# ኔትወርክ እንዳይቋረጥ session መጨመር
+session = AiohttpSession()
+bot = Bot(token=API_TOKEN, session=session)
 dp = Dispatcher()
 
 # 2. የዳታቤዝ ዝግጅት
@@ -21,11 +26,12 @@ cursor.execute('''CREATE TABLE IF NOT EXISTS scores
                   (user_id INTEGER PRIMARY KEY, name TEXT, points REAL DEFAULT 0)''')
 conn.commit()
 
-# 3. የጥያቄዎች ፋይል
+# 3. የጥያቄዎች ፋይል መጫን
 try:
     with open('questions.json', 'r', encoding='utf-8') as f:
         questions = json.load(f)
-except:
+except FileNotFoundError:
+    logging.error("questions.json ፋይል አልተገኘም!")
     questions = []
 
 active_loops = {}
@@ -78,6 +84,10 @@ async def cmd_rank(message: types.Message):
 # --- የጥያቄ ዑደት (በየ 4 ደቂቃ) ---
 async def quiz_timer(chat_id):
     local_q = list(questions)
+    if not local_q:
+        logging.warning("ጥያቄዎች ዝርዝር ባዶ ነው።")
+        return
+        
     random.shuffle(local_q)
     idx = 0
     
@@ -105,6 +115,10 @@ async def quiz_timer(chat_id):
                 "all_participants": []
             }
             idx += 1
+        except TelegramNetworkError:
+            logging.error("የኔትወርክ መቆራረጥ አጋጥሟል... ከ5 ሰከንድ በኋላ ይሞክራል")
+            await asyncio.sleep(5)
+            continue
         except Exception as e:
             logging.error(f"Error: {e}")
 
@@ -118,27 +132,40 @@ async def on_poll_answer(poll_answer: types.PollAnswer):
     user_id = poll_answer.user.id
     user_name = poll_answer.user.full_name
     
-    # ተሳታፊዎችን መመዝገብ (ለ 1.5 ነጥብ)
+    # ተሳታፊዎችን መመዝገብ
     if user_id not in data["all_participants"]:
         data["all_participants"].append(user_id)
 
     # ትክክል ከመለሰ
     if poll_answer.option_ids[0] == data["correct"]:
-        data["winners"].append(user_id)
-        is_first = len(data["winners"]) == 1
-        points = 8 if is_first else 4
-        save_score(user_id, user_name, points)
-        
-        if is_first:
-            await bot.send_message(data["chat_id"], f"👏 ጎበዝ {poll_answer.user.first_name}! ቀድመህ በመመለስህ 8 ነጥብ አግኝተሃል! 🎉")
+        if user_id not in data["winners"]:
+            data["winners"].append(user_id)
+            is_first = len(data["winners"]) == 1
+            points = 8 if is_first else 4
+            save_score(user_id, user_name, points)
+            
+            if is_first:
+                try:
+                    await bot.send_message(data["chat_id"], f"👏 ጎበዝ {poll_answer.user.first_name}! ቀድመህ በመመለስህ 8 ነጥብ አግኝተሃል! 🎉")
+                except:
+                    pass
     
     # ለተሳተፈ (ለተሳሳተ) 1.5 ነጥብ
     else:
         save_score(user_id, user_name, 1.5)
 
 async def main():
-    await bot.delete_webhook(drop_pending_updates=True)
-    await dp.start_polling(bot)
+    try:
+        logging.info("ቦቱ ስራ ጀምሯል...")
+        await bot.delete_webhook(drop_pending_updates=True)
+        await dp.start_polling(bot)
+    finally:
+        # ሴሽኑን እና ዳታቤዙን በስርዓት መዝጋት
+        await bot.session.close()
+        conn.close()
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    try:
+        asyncio.run(main())
+    except (KeyboardInterrupt, SystemExit):
+        logging.info("ቦቱ ቆሟል!")
