@@ -5,13 +5,22 @@ import random
 import sqlite3
 from aiogram import Bot, Dispatcher, types
 from aiogram.filters import Command
+from aiogram.client.default import DefaultBotProperties
+from aiogram.client.session.aiohttp import AiohttpSession
 
 # 1. ቦቱን እና ባለቤቶቹን መለየት
 API_TOKEN = '8392060519:AAEn4tQwJgB2Q7QTNb5fM3XD59bnX34bxKg'
 ADMIN_IDS = [7231324244, 8394878208] 
 
 logging.basicConfig(level=logging.INFO)
-bot = Bot(token=API_TOKEN)
+
+# የኔትወርክ ስህተትን ለመቀነስ Timeout መጨመር
+session = AiohttpSession()
+bot = Bot(
+    token=API_TOKEN, 
+    session=session,
+    default=DefaultBotProperties(timeout=40)
+)
 dp = Dispatcher()
 
 # 2. የዳታቤዝ ዝግጅት
@@ -65,7 +74,6 @@ async def cmd_stop(message: types.Message):
     chat_id = message.chat.id
     active_loops[chat_id] = False
     
-    # አሸናፊውን መፈለግ
     cursor.execute("SELECT name, points FROM scores ORDER BY points DESC LIMIT 1")
     winner = cursor.fetchone()
     
@@ -81,7 +89,6 @@ async def cmd_stop(message: types.Message):
 async def cmd_clear(message: types.Message):
     if message.from_user.id not in ADMIN_IDS:
         return
-    
     cursor.execute("DELETE FROM scores")
     conn.commit()
     await message.answer("♻️ የደረጃ ሰንጠረዡ በሙሉ ተሰርዟል። አዲስ ውድድር መጀመር ይቻላል።")
@@ -129,9 +136,9 @@ async def quiz_timer(chat_id):
             }
             idx += 1
         except Exception as e:
-            logging.error(f"Error: {e}")
+            logging.error(f"Error sending poll: {e}")
 
-        await asyncio.sleep(240) # 4 ደቂቃ
+        await asyncio.sleep(240)
 
 @dp.poll_answer()
 async def on_poll_answer(poll_answer: types.PollAnswer):
@@ -156,8 +163,14 @@ async def on_poll_answer(poll_answer: types.PollAnswer):
         save_score(user_id, user_name, 1.5)
 
 async def main():
-    await bot.delete_webhook(drop_pending_updates=True)
-    await dp.start_polling(bot)
+    try:
+        await bot.delete_webhook(drop_pending_updates=True)
+        await dp.start_polling(bot)
+    finally:
+        await bot.session.close()
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    try:
+        asyncio.run(main())
+    except (KeyboardInterrupt, SystemExit):
+        logging.info("Bot stopped!")
