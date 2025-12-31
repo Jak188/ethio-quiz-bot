@@ -8,6 +8,7 @@ from aiogram import Bot, Dispatcher, types
 from aiogram.filters import Command
 from aiogram.client.default import DefaultBotProperties
 from aiogram.client.session.aiohttp import AiohttpSession
+from aiogram.exceptions import TelegramNetworkError, TelegramRetryAfter
 
 # 1. ቦቱን እና ባለቤቶቹን መለየት
 API_TOKEN = '8392060519:AAEn4tQwJgB2Q7QTNb5fM3XD59bnX34bxKg'
@@ -15,10 +16,9 @@ ADMIN_IDS = [7231324244, 8394878208]
 
 logging.basicConfig(level=logging.INFO)
 
-# የኔትወርክ ስህተትን ለመቀነስ በ AiohttpSession በኩል timeout ማስተካከል
-# ይህ በስክሪንሾቱ ላይ የታየውን TypeError ያስቀራል
+# የኔትወርክ ግንኙነት መዘግየትን ለመቋቋም ረዘም ያለ Timeout መጠቀም
 session = AiohttpSession(
-    timeout=aiohttp.ClientTimeout(total=40)
+    timeout=aiohttp.ClientTimeout(total=60, connect=15, sock_read=45)
 )
 
 bot = Bot(
@@ -110,7 +110,7 @@ async def cmd_rank(message: types.Message):
         text += f"{i}. {row[0]} — {row[1]} ነጥብ\n"
     await message.answer(text)
 
-# --- የጥያቄ ዑደት ---
+# --- የጥያቄ ዑደት (Retry Logic ተጨምሮበታል) ---
 async def quiz_timer(chat_id):
     local_q = list(questions)
     random.shuffle(local_q)
@@ -124,26 +124,35 @@ async def quiz_timer(chat_id):
         q = local_q[idx]
         subject = q.get('subject', 'General')
         
-        try:
-            sent_poll = await bot.send_poll(
-                chat_id=chat_id,
-                question=f"📚 Subject: {subject}\n\n{q['q']}",
-                options=q['o'],
-                type='quiz',
-                correct_option_id=q['c'],
-                is_anonymous=False
-            )
-            poll_map[sent_poll.poll.id] = {
-                "correct": q['c'], 
-                "chat_id": chat_id, 
-                "winners": [], 
-                "all_participants": []
-            }
-            idx += 1
-        except Exception as e:
-            logging.error(f"Error sending poll: {e}")
+        # ኔትወርክ ሲቋረጥ ድጋሚ የመሞከር ዘዴ (Retry Loop)
+        for attempt in range(3): 
+            try:
+                sent_poll = await bot.send_poll(
+                    chat_id=chat_id,
+                    question=f"📚 Subject: {subject}\n\n{q['q']}",
+                    options=q['o'],
+                    type='quiz',
+                    correct_option_id=q['c'],
+                    is_anonymous=False
+                )
+                poll_map[sent_poll.poll.id] = {
+                    "correct": q['c'], 
+                    "chat_id": chat_id, 
+                    "winners": [], 
+                    "all_participants": []
+                }
+                idx += 1
+                break # ከተላከ ሉፑ ይቆማል
+            except (TelegramNetworkError, asyncio.TimeoutError):
+                logging.warning(f"Network error on attempt {attempt+1}. Retrying...")
+                await asyncio.sleep(5) # 5 ሰከንድ ቆይቶ ድጋሚ ይሞክራል
+            except TelegramRetryAfter as e:
+                await asyncio.sleep(e.retry_after) # ቴሌግራም ፍጥነት ቀንስ ካለ የጠየቀውን ጊዜ ይጠብቃል
+            except Exception as e:
+                logging.error(f"Unexpected error: {e}")
+                break
 
-        await asyncio.sleep(240)
+        await asyncio.sleep(240) # 4 ደቂቃ ይጠብቃል
 
 @dp.poll_answer()
 async def on_poll_answer(poll_answer: types.PollAnswer):
@@ -163,7 +172,10 @@ async def on_poll_answer(poll_answer: types.PollAnswer):
         save_score(user_id, user_name, points)
         
         if is_first:
-            await bot.send_message(data["chat_id"], f"GREAT <b>{user_name}</b> ቀድመው በመመለስዎ 8 ነጥብ አግኝተዋል! 🎉")
+            try:
+                await bot.send_message(data["chat_id"], f"GREAT <b>{user_name}</b> ቀድመው በመመለስዎ 8 ነጥብ አግኝተዋል! 🎉")
+            except:
+                pass # መልዕክቱ ባይላክም ነጥቡ ተመዝግቧል
     else:
         save_score(user_id, user_name, 1.5)
 
