@@ -3,7 +3,6 @@ import json
 import logging
 import random
 import sqlite3
-import os
 from aiogram import Bot, Dispatcher, types
 from aiogram.filters import Command
 
@@ -15,41 +14,41 @@ logging.basicConfig(level=logging.INFO)
 bot = Bot(token=API_TOKEN)
 dp = Dispatcher()
 
-# 2. የዳታቤዝ ዝግጅት
+# 2. የዳታቤዝ ዝግጅት (ውጤት እንዳይጠፋ)
 conn = sqlite3.connect('quiz_results.db', check_same_thread=False)
 cursor = conn.cursor()
 cursor.execute('''CREATE TABLE IF NOT EXISTS scores 
                   (user_id INTEGER PRIMARY KEY, name TEXT, points REAL DEFAULT 0)''')
 conn.commit()
 
-# 3. ጥያቄዎችን ከ bot.py ላይ መጫን እና በዘርፍ መለየት
+# 3. ጥያቄዎችን ከ bot.py (JSON content) ላይ መጫን እና በዘርፍ መለየት
 def load_and_filter_questions():
     try:
-        # bot.py ፋይልን እንደ JSON አንብቦ መረጃውን ይወስዳል
+        # ፋይሉ ስሙ bot.py ቢሆንም ዳታው JSON ስለሆነ በ json.load እናነባዋለን
         with open('bot.py', 'r', encoding='utf-8') as f:
             raw_data = json.load(f)
             
         filtered = []
         for q in raw_data:
             txt = q['q'].lower()
-            # ቁልፍ ቃላትን በመጠቀም ትምህርቶቹን መለየት
-            if any(k in txt for k in ['f(x)', 'x^', 'solve', 'math', '%', 'pi', 'value of', 'derivative']):
-                q['sub'] = 'Mathematics'
-            elif any(k in txt for k in ['synonym', 'adverb', 'grammar', 'english', 'identify', 'adjective']):
+            # ቁልፍ ቃላትን በመጠቀም English, Math, Geography, History መለየት
+            if any(k in txt for k in ['f(x)', 'x^', 'solve', 'math', 'pi', 'value of', 'derivative', 'newton', 'ohm', 'force']):
+                q['sub'] = 'Mathematics/Physics'
+            elif any(k in txt for k in ['synonym', 'antonym', 'adverb', 'grammar', 'english', 'identify', 'meaning of']):
                 q['sub'] = 'English'
-            elif any(k in txt for k in ['country', 'land area', 'capital', 'geography', 'river', 'continent', 'ocean']):
+            elif any(k in txt for k in ['country', 'land area', 'capital', 'geography', 'river', 'continent', 'ocean', 'outer core', 'sand']):
                 q['sub'] = 'Geography'
-            elif any(k in txt for k in ['history', 'liberator', 'war', 'ancient', 'who was', 'century', 'emperor']):
+            elif any(k in txt for k in ['history', 'liberator', 'war', 'ancient', 'who was', 'century', 'bolivar']):
                 q['sub'] = 'History'
             else:
-                q['sub'] = None # ሌሎች ትምህርቶች (ለምሳሌ ፊዚክስ) እዚህ ይገባሉ
+                q['sub'] = 'General'
                 
             # የፈለግካቸው 4ቱ ዘርፎች ብቻ እንዲመረጡ
-            if q['sub'] in ['English', 'Mathematics', 'Geography', 'History']:
+            if q['sub'] in ['English', 'Mathematics/Physics', 'Geography', 'History']:
                 filtered.append(q)
         return filtered
     except Exception as e:
-        logging.error(f"Error loading bot.py: {e}")
+        logging.error(f"Error reading bot.py: {e}")
         return []
 
 questions = load_and_filter_questions()
@@ -67,14 +66,13 @@ def save_score(user_id, name, points):
         cursor.execute("INSERT INTO scores (user_id, name, points) VALUES (?, ?, ?)", (user_id, name, points))
     conn.commit()
 
-# --- ኮማንዶች ---
+# --- ኮማንዶች (አድሚን ብቻ) ---
 
 @dp.message(Command("start"))
 async def cmd_start(message: types.Message):
     if message.from_user.id not in ADMIN_IDS: return
     chat_id = message.chat.id
-    if active_loops.get(chat_id):
-        return await message.answer("⚠️ ውድድሩ ቀድሞውኑ እየሰራ ነው።")
+    if active_loops.get(chat_id): return
     
     active_loops[chat_id] = True
     await message.answer(
@@ -91,7 +89,7 @@ async def cmd_start(message: types.Message):
 async def cmd_stop(message: types.Message):
     if message.from_user.id not in ADMIN_IDS: return
     active_loops[message.chat.id] = False
-    await message.answer("🛑 ውድድሩ ቆሟል።")
+    await message.answer("🛑 ውድድሩ ቆሟል። ውጤቶች ተቀምጠዋል።")
 
 @dp.message(Command("rank"))
 async def cmd_rank(message: types.Message):
@@ -108,7 +106,7 @@ async def cmd_rank(message: types.Message):
 # --- የጥያቄ ዑደት (በየ 4 ደቂቃ) ---
 async def quiz_timer(chat_id):
     if not questions:
-        await bot.send_message(chat_id, "❌ ምንም ጥያቄዎች አልተገኙም። bot.py ፋይልን አረጋግጥ።")
+        await bot.send_message(chat_id, "❌ ተስማሚ ጥያቄዎች አልተገኙም። bot.py ፋይልን አረጋግጥ።")
         return
 
     local_q = list(questions)
@@ -128,7 +126,7 @@ async def quiz_timer(chat_id):
                 options=q['o'],
                 type='quiz',
                 correct_option_id=q['c'],
-                explanation=q.get('e', "ትክክለኛ መልስ!"),
+                explanation=q.get('e', ""),
                 is_anonymous=False
             )
             poll_map[sent_poll.poll.id] = {"correct": q['c'], "chat_id": chat_id, "winners": []}
@@ -136,7 +134,7 @@ async def quiz_timer(chat_id):
         except Exception as e:
             logging.error(f"Poll Error: {e}")
 
-        await asyncio.sleep(240) # 4 ደቂቃ
+        await asyncio.sleep(240) # 4 ደቂቃ = 240 ሰከንድ
 
 @dp.poll_answer()
 async def on_poll_answer(poll_answer: types.PollAnswer):
