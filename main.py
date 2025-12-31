@@ -14,9 +14,9 @@ ADMIN_IDS = [7231324244, 8394878208]
 
 logging.basicConfig(level=logging.INFO)
 
-# --- ማስተካከያ 1: Timeout መጨመር ---
-# ኔትወርክ ቢዘገይ ቦቱ ቶሎ ተስፋ እንዳይቆርጥ 30 ሰከንድ ሰጥተነዋል
-session = AiohttpSession(timeout=30)
+# --- ማስተካከያ 1: Timeout እና Session አያያዝ ---
+# ኔትወርክ ቢዘገይ ቦቱ ቶሎ ተስፋ እንዳይቆርጥ 60 ሰከንድ ሰጥተነዋል
+session = AiohttpSession(timeout=60)
 bot = Bot(token=API_TOKEN, session=session)
 dp = Dispatcher()
 
@@ -90,17 +90,19 @@ async def quiz_timer(chat_id):
     idx = 0
     
     while active_loops.get(chat_id):
-        if idx >= len(local_q):
-            random.shuffle(local_q)
-            idx = 0
-        
-        q = local_q[idx]
-        subject = q.get('subject', 'General')
-        
         try:
+            if idx >= len(local_q):
+                random.shuffle(local_q)
+                idx = 0
+            
+            q = local_q[idx]
+            
+            # ፖል ከመላኩ በፊት ኔትወርኩን ለማረጋጋት 1 ሰከንድ መጠበቅ
+            await asyncio.sleep(1)
+            
             sent_poll = await bot.send_poll(
                 chat_id=chat_id,
-                question=f"📚 Subject: {subject}\n\n{q['q']}",
+                question=f"📚 Subject: {q.get('subject', 'General')}\n\n{q['q']}",
                 options=q['o'],
                 type='quiz',
                 correct_option_id=q['c'],
@@ -113,10 +115,10 @@ async def quiz_timer(chat_id):
                 "all_participants": []
             }
             idx += 1
-            # ጥያቄው በትክክል ከተላከ ለ 4 ደቂቃ ይጠብቃል
+            # ጥያቄው ከተላከ በኋላ ለ 4 ደቂቃ ይጠብቃል
             await asyncio.sleep(240) 
             
-        except TelegramNetworkError:
+        except (TelegramNetworkError, asyncio.TimeoutError):
             # --- ማስተካከያ 2: የኔትወርክ ስህተትን መያዝ ---
             logging.error("የኔትወርክ መቆራረጥ አጋጥሟል... ለ30 ሰከንድ ቆይቶ እንደገና ይሞክራል")
             await asyncio.sleep(30)
