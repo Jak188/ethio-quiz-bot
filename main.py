@@ -3,10 +3,11 @@ import json
 import logging
 import random
 import sqlite3
+import aiohttp
 from aiogram import Bot, Dispatcher, types
 from aiogram.filters import Command
+from aiogram.client.default import DefaultBotProperties
 from aiogram.client.session.aiohttp import AiohttpSession
-from aiogram.exceptions import TelegramNetworkError
 
 # 1. ቦቱን እና ባለቤቶቹን መለየት
 API_TOKEN = '8392060519:AAEn4tQwJgB2Q7QTNb5fM3XD59bnX34bxKg'
@@ -14,10 +15,17 @@ ADMIN_IDS = [7231324244, 8394878208]
 
 logging.basicConfig(level=logging.INFO)
 
-# --- ማስተካከያ 1: Timeout እና Session አያያዝ ---
-# ኔትወርክ ቢዘገይ ቦቱ ቶሎ ተስፋ እንዳይቆርጥ 60 ሰከንድ ሰጥተነዋል
-session = AiohttpSession(timeout=60)
-bot = Bot(token=API_TOKEN, session=session)
+# የኔትወርክ ስህተትን ለመቀነስ በ AiohttpSession በኩል timeout ማስተካከል
+# ይህ በስክሪንሾቱ ላይ የታየውን TypeError ያስቀራል
+session = AiohttpSession(
+    timeout=aiohttp.ClientTimeout(total=40)
+)
+
+bot = Bot(
+    token=API_TOKEN, 
+    session=session,
+    default=DefaultBotProperties(parse_mode="HTML")
+)
 dp = Dispatcher()
 
 # 2. የዳታቤዝ ዝግጅት
@@ -32,7 +40,7 @@ try:
     with open('questions.json', 'r', encoding='utf-8') as f:
         questions = json.load(f)
 except Exception as e:
-    logging.error(f"የጥያቄ ፋይል ስህተት: {e}")
+    logging.error(f"Error loading questions: {e}")
     questions = []
 
 active_loops = {}
@@ -67,8 +75,28 @@ async def cmd_start(message: types.Message):
 async def cmd_stop(message: types.Message):
     if message.from_user.id not in ADMIN_IDS:
         return
-    active_loops[message.chat.id] = False
-    await message.answer("🛑 ውድድሩ በዚህ ግሩፕ ቆሟል። ውጤቶች ተቀምጠዋል።")
+    
+    chat_id = message.chat.id
+    active_loops[chat_id] = False
+    
+    cursor.execute("SELECT name, points FROM scores ORDER BY points DESC LIMIT 1")
+    winner = cursor.fetchone()
+    
+    stop_text = "🛑 ውድድሩ በዚህ ግሩፕ ቆሟል።\n\n"
+    if winner:
+        stop_text += f"🏆 የዛሬው አሸናፊ: <b>{winner[0]}</b>\n"
+        stop_text += f"⭐️ ያጠራቀሙት ነጥብ: <b>{winner[1]}</b>\n\n"
+        stop_text += "እንኳን ደስ አለዎት! 🎉🎊🥳 🏆🏆🏆"
+    
+    await message.answer(stop_text)
+
+@dp.message(Command("clear_rank"))
+async def cmd_clear(message: types.Message):
+    if message.from_user.id not in ADMIN_IDS:
+        return
+    cursor.execute("DELETE FROM scores")
+    conn.commit()
+    await message.answer("♻️ የደረጃ ሰንጠረዡ በሙሉ ተሰርዟል። አዲስ ውድድር መጀመር ይቻላል።")
 
 @dp.message(Command("rank"))
 async def cmd_rank(message: types.Message):
@@ -77,7 +105,7 @@ async def cmd_rank(message: types.Message):
     if not rows:
         return await message.answer("እስካሁን ምንም ውጤት የለም።")
     
-    text = "🏆 **አጠቃላይ የደረጃ ሰንጠረዥ (Top 10)** 🏆\n\n"
+    text = "🏆 አጠቃላይ የደረጃ ሰንጠረዥ (Top 10) 🏆\n\n"
     for i, row in enumerate(rows, 1):
         text += f"{i}. {row[0]} — {row[1]} ነጥብ\n"
     await message.answer(text)
@@ -85,24 +113,21 @@ async def cmd_rank(message: types.Message):
 # --- የጥያቄ ዑደት ---
 async def quiz_timer(chat_id):
     local_q = list(questions)
-    if not local_q: return
     random.shuffle(local_q)
     idx = 0
     
     while active_loops.get(chat_id):
+        if idx >= len(local_q):
+            random.shuffle(local_q)
+            idx = 0
+        
+        q = local_q[idx]
+        subject = q.get('subject', 'General')
+        
         try:
-            if idx >= len(local_q):
-                random.shuffle(local_q)
-                idx = 0
-            
-            q = local_q[idx]
-            
-            # ፖል ከመላኩ በፊት ኔትወርኩን ለማረጋጋት 1 ሰከንድ መጠበቅ
-            await asyncio.sleep(1)
-            
             sent_poll = await bot.send_poll(
                 chat_id=chat_id,
-                question=f"📚 Subject: {q.get('subject', 'General')}\n\n{q['q']}",
+                question=f"📚 Subject: {subject}\n\n{q['q']}",
                 options=q['o'],
                 type='quiz',
                 correct_option_id=q['c'],
@@ -115,17 +140,10 @@ async def quiz_timer(chat_id):
                 "all_participants": []
             }
             idx += 1
-            # ጥያቄው ከተላከ በኋላ ለ 4 ደቂቃ ይጠብቃል
-            await asyncio.sleep(240) 
-            
-        except (TelegramNetworkError, asyncio.TimeoutError):
-            # --- ማስተካከያ 2: የኔትወርክ ስህተትን መያዝ ---
-            logging.error("የኔትወርክ መቆራረጥ አጋጥሟል... ለ30 ሰከንድ ቆይቶ እንደገና ይሞክራል")
-            await asyncio.sleep(30)
-            continue
         except Exception as e:
-            logging.error(f"Error: {e}")
-            await asyncio.sleep(10)
+            logging.error(f"Error sending poll: {e}")
+
+        await asyncio.sleep(240)
 
 @dp.poll_answer()
 async def on_poll_answer(poll_answer: types.PollAnswer):
@@ -139,33 +157,25 @@ async def on_poll_answer(poll_answer: types.PollAnswer):
         data["all_participants"].append(user_id)
 
     if poll_answer.option_ids[0] == data["correct"]:
-        if user_id not in data["winners"]:
-            data["winners"].append(user_id)
-            is_first = len(data["winners"]) == 1
-            points = 8 if is_first else 4
-            save_score(user_id, user_name, points)
-            
-            if is_first:
-                try:
-                    await bot.send_message(data["chat_id"], f"👏 ጎበዝ {poll_answer.user.first_name}! ቀድመህ በመመለስህ 8 ነጥብ አግኝተሃል! 🎉")
-                except: pass
+        data["winners"].append(user_id)
+        is_first = len(data["winners"]) == 1
+        points = 8 if is_first else 4
+        save_score(user_id, user_name, points)
+        
+        if is_first:
+            await bot.send_message(data["chat_id"], f"GREAT <b>{user_name}</b> ቀድመው በመመለስዎ 8 ነጥብ አግኝተዋል! 🎉")
     else:
         save_score(user_id, user_name, 1.5)
 
-# --- ማስተካከያ 3: ሴሽኑን በስርዓት መዝጋት ---
 async def main():
     try:
-        logging.info("ቦቱ ስራ ጀምሯል...")
         await bot.delete_webhook(drop_pending_updates=True)
         await dp.start_polling(bot)
     finally:
-        # ቦቱ ሲቆም ግንኙነቶች በሙሉ እንዲዘጉ ያደርጋል
         await bot.session.close()
-        conn.close()
-        logging.info("ሁሉም ግንኙነቶች ተዘግተዋል።")
 
 if __name__ == "__main__":
     try:
         asyncio.run(main())
     except (KeyboardInterrupt, SystemExit):
-        pass
+        logging.info("Bot stopped!")
