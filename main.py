@@ -23,10 +23,10 @@ conn.commit()
 
 # 3. የጥያቄዎች ፋይል
 try:
-with open('questions.json', 'r', encoding='utf-8') as f:
-questions = json.load(f)
+    with open('questions.json', 'r', encoding='utf-8') as f:
+        questions = json.load(f)
 except:
-questions = []
+    questions = []
 
 active_loops = {}
 poll_map = {}
