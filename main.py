@@ -3,6 +3,7 @@ import json
 import logging
 import random
 import sqlite3
+import os
 from aiogram import Bot, Dispatcher, types
 from aiogram.filters import Command
 
@@ -23,40 +24,33 @@ conn.commit()
 
 # 3. ጥያቄዎችን ከ bot.py ላይ መጫን እና በዘርፍ መለየት
 def load_and_filter_questions():
-    # አንተ የሰጠኸኝ ጥያቄዎች ዝርዝር
-    raw_data = [
-        {"q": "If f(x) = 3x + 2, find f(4).", "o": ["12", "14", "10", "16"], "c": 1, "e": "f(4) = 3(4) + 2 = 14."},
-        {"q": "Solve for x: x^2 = 25.", "o": ["5 only", "-5 only", "5 and -5", "0"], "c": 2, "e": "Both 5 and -5 squared equal 25."},
-        {"q": "What is the derivative of x^3?", "o": ["x^2", "3x", "3x^2", "2x^3"], "c": 2, "e": "3x^2 using power rule."},
-        {"q": "In Math, what is 25% of 200?", "o": ["25", "40", "50", "75"], "c": 2, "e": "0.25 * 200 = 50."},
-        {"q": "What is the value of pi (to 2 decimal places)?", "o": ["3.12", "3.14", "3.16", "3.18"], "c": 1, "e": "Pi is 3.14."},
-        {"q": "Choose the synonym for 'Huge':", "o": ["Tiny", "Massive", "Small", "Short"], "c": 1, "e": "Massive means huge."},
-        {"q": "Identify the adverb in: 'She ran fast.'", "o": ["She", "ran", "fast", "runs"], "c": 2, "e": "Fast is the adverb."},
-        {"q": "Which country is the largest in the world by land area?", "o": ["USA", "China", "Russia", "Canada"], "c": 2, "e": "Russia is the largest."},
-        {"q": "Who was the 'Liberator' of South America?", "o": ["Napoleon", "Simon Bolivar", "San Martin", "Columbus"], "c": 1, "e": "Simon Bolivar."},
-        {"q": "What is the capital of France?", "o": ["Berlin", "Madrid", "Paris", "Rome"], "c": 2, "e": "Paris is the capital."},
-        # ... ሌሎች ጥያቄዎች ቢኖሩም ኮዱ በራሱ ይለያቸዋል
-    ]
-    
-    filtered = []
-    for q in raw_data:
-        txt = q['q'].lower()
-        # የትምህርት ዘርፎችን በቁልፍ ቃላት መለየት
-        if any(k in txt for k in ['f(x)', 'x^', 'solve', 'math', '%', 'pi', 'value of']):
-            q['sub'] = 'Mathematics'
-        elif any(k in txt for k in ['synonym', 'adverb', 'grammar', 'english', 'identify']):
-            q['sub'] = 'English'
-        elif any(k in txt for k in ['country', 'land area', 'capital', 'geography', 'river']):
-            q['sub'] = 'Geography'
-        elif any(k in txt for k in ['history', 'liberator', 'war', 'ancient', 'who was']):
-            q['sub'] = 'History'
-        else:
-            q['sub'] = None # ሌሎች ትምህርቶች (ለምሳሌ ፊዚክስ) እዚህ ይገባሉ
+    try:
+        # bot.py ፋይልን እንደ JSON አንብቦ መረጃውን ይወስዳል
+        with open('bot.py', 'r', encoding='utf-8') as f:
+            raw_data = json.load(f)
             
-        # አንተ የፈለግካቸው 4ቱ ብቻ እንዲመረጡ
-        if q['sub'] in ['English', 'Mathematics', 'Geography', 'History']:
-            filtered.append(q)
-    return filtered
+        filtered = []
+        for q in raw_data:
+            txt = q['q'].lower()
+            # ቁልፍ ቃላትን በመጠቀም ትምህርቶቹን መለየት
+            if any(k in txt for k in ['f(x)', 'x^', 'solve', 'math', '%', 'pi', 'value of', 'derivative']):
+                q['sub'] = 'Mathematics'
+            elif any(k in txt for k in ['synonym', 'adverb', 'grammar', 'english', 'identify', 'adjective']):
+                q['sub'] = 'English'
+            elif any(k in txt for k in ['country', 'land area', 'capital', 'geography', 'river', 'continent', 'ocean']):
+                q['sub'] = 'Geography'
+            elif any(k in txt for k in ['history', 'liberator', 'war', 'ancient', 'who was', 'century', 'emperor']):
+                q['sub'] = 'History'
+            else:
+                q['sub'] = None # ሌሎች ትምህርቶች (ለምሳሌ ፊዚክስ) እዚህ ይገባሉ
+                
+            # የፈለግካቸው 4ቱ ዘርፎች ብቻ እንዲመረጡ
+            if q['sub'] in ['English', 'Mathematics', 'Geography', 'History']:
+                filtered.append(q)
+        return filtered
+    except Exception as e:
+        logging.error(f"Error loading bot.py: {e}")
+        return []
 
 questions = load_and_filter_questions()
 
@@ -79,10 +73,18 @@ def save_score(user_id, name, points):
 async def cmd_start(message: types.Message):
     if message.from_user.id not in ADMIN_IDS: return
     chat_id = message.chat.id
-    if active_loops.get(chat_id): return
+    if active_loops.get(chat_id):
+        return await message.answer("⚠️ ውድድሩ ቀድሞውኑ እየሰራ ነው።")
     
     active_loops[chat_id] = True
-    await message.answer("🚀 ውድድሩ ተጀመረ!\n📚 ትምህርቶች: English, Math, Geography, History\n⏰ በየ 4 ደቂቃው ጥያቄ ይላካል።")
+    await message.answer(
+        "🚀 **የኩዊዝ ውድድር ተጀመረ!**\n"
+        "📚 ትምህርቶች: English, Math, Geography, History\n"
+        "⏰ በየ 4 ደቂቃው ጥያቄ ይላካል።\n\n"
+        "🥇 1ኛ ለመለሰ: 8 ነጥብ\n"
+        "✅ ለሌላ ትክክል: 4 ነጥብ\n"
+        "✍️ ለተሳተፈ: 1.5 ነጥብ"
+    )
     asyncio.create_task(quiz_timer(chat_id))
 
 @dp.message(Command("stop"))
@@ -95,16 +97,24 @@ async def cmd_stop(message: types.Message):
 async def cmd_rank(message: types.Message):
     cursor.execute("SELECT name, points FROM scores ORDER BY points DESC LIMIT 10")
     rows = cursor.fetchall()
+    if not rows:
+        return await message.answer("እስካሁን ምንም ውጤት አልተመዘገበም።")
+    
     text = "🏆 **የደረጃ ሰንጠረዥ (Top 10)** 🏆\n\n"
     for i, row in enumerate(rows, 1):
         text += f"{i}. {row[0]} — {round(row[1], 1)} ነጥብ\n"
     await message.answer(text)
 
-# --- የጥያቄ ዑደት ---
+# --- የጥያቄ ዑደት (በየ 4 ደቂቃ) ---
 async def quiz_timer(chat_id):
+    if not questions:
+        await bot.send_message(chat_id, "❌ ምንም ጥያቄዎች አልተገኙም። bot.py ፋይልን አረጋግጥ።")
+        return
+
     local_q = list(questions)
     random.shuffle(local_q)
     idx = 0
+    
     while active_loops.get(chat_id):
         if idx >= len(local_q):
             random.shuffle(local_q)
@@ -118,12 +128,14 @@ async def quiz_timer(chat_id):
                 options=q['o'],
                 type='quiz',
                 correct_option_id=q['c'],
-                explanation=q.get('e', ""),
+                explanation=q.get('e', "ትክክለኛ መልስ!"),
                 is_anonymous=False
             )
             poll_map[sent_poll.poll.id] = {"correct": q['c'], "chat_id": chat_id, "winners": []}
             idx += 1
-        except: pass
+        except Exception as e:
+            logging.error(f"Poll Error: {e}")
+
         await asyncio.sleep(240) # 4 ደቂቃ
 
 @dp.poll_answer()
@@ -134,13 +146,14 @@ async def on_poll_answer(poll_answer: types.PollAnswer):
     user_id = poll_answer.user.id
     user_name = poll_answer.user.full_name
 
+    # ትክክል ከመለሰ
     if poll_answer.option_ids[0] == data["correct"]:
         data["winners"].append(user_id)
         is_first = len(data["winners"]) == 1
         points = 8 if is_first else 4
         save_score(user_id, user_name, points)
         if is_first:
-            await bot.send_message(data["chat_id"], f"👏 ጎበዝ {poll_answer.user.first_name}! +8 ነጥብ! 🎉")
+            await bot.send_message(data["chat_id"], f"👏 {poll_answer.user.first_name} ቀድሞ በመመለሱ +8 ነጥብ አግኝቷል! 🎊")
     else:
         # ለተሳተፈ (ለተሳሳተ) ሰው 1.5 ነጥብ
         save_score(user_id, user_name, 1.5)
